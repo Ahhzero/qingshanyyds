@@ -1,0 +1,6 @@
+可能存在目录浏览:https://www.baidu.com/info.php
+可能存在目录浏览:https://www.baidu.com/test.php
+可能存在目录浏览:https://www.baidu.com/phpinfo.php
+可能存在目录浏览:https://www.baidu.com/php_info.php
+可能存在目录浏览:https://www.baidu.com/1.php
+可能存在目录浏览:https://www.baidu.com/ceshi.php

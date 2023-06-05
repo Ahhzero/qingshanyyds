@@ -1,0 +1,6 @@
+/?author=1
+/wp-json/wp/v2/users
+/?rest_route=/wp/v2/users
+/author-sitemap.xml
+/wp-json/wp/v2/users/?per_page=100&page=1
+/wp-sitemap-users-1.xml

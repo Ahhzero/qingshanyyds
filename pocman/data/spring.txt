@@ -1,0 +1,11 @@
+/actuator/health
+/actuator/info
+/actuator/metrics
+/actuator/loggers
+/actuator/trace
+/actuator/beans
+/actuator/mappings
+/actuator/env
+/actuator/auditevents
+/actuator/shutdown
+/actuator/redis/info

